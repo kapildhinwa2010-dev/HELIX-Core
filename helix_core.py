@@ -1,12 +1,16 @@
-# HELIX-Core - Core spiral-addressed memory with parity-based error correction
+# HELIX-Core - Core spiral-addressed memory with parity-based error detection
 # Part of the Kapildhinwa2010-dev Toolkit.
 
-"""HELIX-Net - spiral-addressed memory with XOR parity protection.
+"""HELIX-Core - record arena with spiral addressing and XOR parity.
 
-Lineage: reserv.dean-part-2 (helix.py). Content is addressed by a spiral
-coordinate walk over a square arena; each record occupies one row and is
-protected by XOR parity so a single corrupted byte is detectable AND
-correctable via repair().
+Lineage: reserv.dean-part-2 (helix.py). Each key owns one row; the full
+record is stored in that row and the last byte is the row XOR parity.
+
+HONEST SCOPE: one XOR parity byte per row DETECTS any odd number of
+flipped bytes but cannot locate them. repair() restores the parity
+byte under the assumption that the record itself is intact; a flipped
+record byte is detected but NOT repairable - read_checked() refuses
+such rows instead of returning silent corruption.
 """
 
 from __future__ import annotations
@@ -17,8 +21,9 @@ import numpy as np
 
 __all__ = ["spiral_coordinates", "HelixMemory"]
 
+
 def spiral_coordinates(size: int):
-    """Clockwise spiral walk of an ``size x size`` grid from the center."""
+    """Clockwise spiral walk of a size x size grid from the center."""
     if size < 1:
         raise ValueError("size must be >= 1")
     coords = []
@@ -28,8 +33,7 @@ def spiral_coordinates(size: int):
     step = 1
     while len(coords) < size * size:
         for d_index, (dx, dy) in enumerate(directions):
-            length = step if d_index % 2 == 0 else step
-            for _ in range(length):
+            for _ in range(step):
                 if len(coords) >= size * size:
                     return coords
                 x += dx
@@ -51,9 +55,8 @@ def _xor_parity(block: np.ndarray) -> int:
 class HelixMemory:
     """Record arena with spiral addressing and per-row XOR parity.
 
-    Each key owns one row of the spiral (row length >= record_size + 1).
-    The last byte of the row is the XOR parity of the record bytes, so a
-    single corrupted byte anywhere in the row can be repaired exactly.
+    Each key owns one row (row length >= record_size + 1). The last
+    byte of the row is the XOR parity of the record bytes.
     """
 
     def __init__(self, size: int = 8, record_size: int = 4) -> None:
@@ -107,6 +110,18 @@ class HelixMemory:
         row = self._slots[key]
         return bytes(self.arena[row, : self.record_size])
 
+    def read_checked(self, key: str) -> bytes:
+        """Read and verify row parity first; raises ValueError on corruption.
+
+        Use this instead of read() when silent corruption is unacceptable.
+        """
+        if key not in self._slots:
+            raise KeyError(key)
+        row = self._slots[key]
+        if _xor_parity(self.arena[row, : self.record_size + 1]) != int(self.parity[row]):
+            raise ValueError("row parity mismatch for key: {}".format(key))
+        return bytes(self.arena[row, : self.record_size])
+
     def read_cell(self, key: str) -> int:
         """First record byte (kept for backward compatibility)."""
         if key in self._slots:
@@ -124,32 +139,39 @@ class HelixMemory:
         return True
 
     def repair(self) -> int:
-        """Repair single-byte corruption per used row; returns rows fixed.
+        """Restore parity bytes of mismatching rows; returns rows touched.
 
-        With one parity byte per row the corrupted position is not known,
-        so repair restores the parity byte itself when only it flipped,
-        and otherwise flags the row (returns count of rows repaired).
-        Multi-byte corruption in one row is detectable but NOT repairable.
+        HONEST SCOPE: with one parity byte the flipped position is
+        unknown. repair() assumes the record bytes are intact and
+        rewrites the parity byte. A flipped RECORD byte is detected by
+        verify() but NOT repairable - repairing after a record flip
+        hides the corruption, so prefer read_checked() for reads.
         """
         fixed = 0
         for row in set(self._slots.values()):
             rec = self.arena[row, : self.record_size]
             stored_p = int(self.arena[row, self.record_size])
             if _xor_parity(rec) != stored_p:
-                # assume record intact, parity byte flipped
                 self.arena[row, self.record_size] = _xor_parity(rec)
                 self.parity[row] = _xor_parity(self.arena[row, : self.record_size + 1])
                 fixed += 1
         return fixed
 
     def corrupt(self, key: str) -> None:
-        """Flip one byte of the record (for testing corruption detection)."""
+        """Flip one record byte (detected by verify, NOT repairable)."""
         if key in self._slots:
             row = self._slots[key]
             self.arena[row, 0] ^= 0xFF
         else:
             x, y = self.coords[self.address(key)]
             self.arena[x, y] ^= 0xFF
+
+    def corrupt_parity(self, key: str) -> None:
+        """Flip the stored parity byte (the case repair() actually fixes)."""
+        if key not in self._slots:
+            raise KeyError(key)
+        row = self._slots[key]
+        self.arena[row, self.record_size] ^= 0xFF
 
     def usage(self) -> float:
         return len(self._used) / (self.size * self.size)

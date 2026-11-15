@@ -1,42 +1,52 @@
 # HELIX-Core
 
-Spiral-addressed memory with XOR parity protection.
+[![CI](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/ci.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/codeql.yml/badge.svg)](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/codeql.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+Core spiral-addressed record arena: one record per row, XOR parity detection, blake2b-keyed slots.
 
 **Part of the [Kapildhinwa2010-dev Toolkit](https://github.com/kapildhinwa2010-dev/Kapildhinwa2010-dev).**
 
-![CI](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/ci.yml/badge.svg)
-![CodeQL](https://github.com/kapildhinwa2010-dev/HELIX-Core/actions/workflows/codeql.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+## What it does
 
-## ✨ Features
+Each key owns one row of a spiral-walked square arena. write() stores
+the full record plus an XOR parity byte; verify() detects any odd
+number of flipped bytes per row; read_checked() refuses corrupted rows
+instead of returning silent corruption. This is the canonical base of
+the spiral-memory family (SpiralDB, ECC-Memory, HELIX-Lib/Pro extend
+it).
 
-- Clockwise spiral coordinate walk over a square arena
-- Deterministic string-key addressing
-- Row XOR parity detects byte corruption
+## Install
 
-## 📦 Install
+    pip install -r requirements.txt
 
-```bash
-pip install -r requirements.txt
-```
+## Quick start
 
-## 🚀 Quick start
+    from helix_core import HelixMemory
 
-```python
-from helix_core import HelixMemory
+    mem = HelixMemory(size=8, record_size=4)
+    mem.write("alpha", b"\x01\x02\x03\x04")
+    print(mem.read_checked("alpha"))
 
-mem = HelixMemory(size=8, record_size=2)
-mem.write('a', b'\x10\x20')
-assert mem.verify()
-```
+## API
 
-## 🧪 Tests
+- write / read / read_checked / read_cell / verify / repair / corrupt /
+  corrupt_parity / usage
+- spiral_coordinates(size)
 
-```bash
-pytest tests/ -v
-```
+## Honest results and limitations
 
-## 📄 License
+- One XOR parity byte per row DETECTS corruption but cannot locate it.
+  repair() restores the parity byte assuming the record is intact; a
+  flipped record byte is detected but NOT repairable. Earlier
+  revisions claimed "repaired exactly" - that was wrong and is fixed.
+- Capacity is one record per row: a 8x8 arena holds 8 records.
+- Two flipped bytes in one row cancel out and pass verify().
+- Research toy for the spiral-addressing idea, not trustworthy storage.
+  For single-cell correction see ECC-Memory (row+column parity).
 
-MIT — see [LICENSE](LICENSE).
+## License
+
+MIT - see [LICENSE](LICENSE).
